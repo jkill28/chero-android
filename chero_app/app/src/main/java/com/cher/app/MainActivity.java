@@ -102,6 +102,15 @@ public class MainActivity extends AppCompatActivity {
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
+
+        // Fix 'disallowed_useragent' by removing WebView-specific strings
+        String userAgent = webSettings.getUserAgentString();
+        if (userAgent != null) {
+            userAgent = userAgent.replaceAll("Version/\\d+\\.\\d+\\s+", "");
+            userAgent = userAgent.replace("; wv", "");
+            webSettings.setUserAgentString(userAgent);
+        }
+
         webView.setWebViewClient(new WebViewClient());
         webView.addJavascriptInterface(new WebAuthInterface(), "AndroidAuth");
 
@@ -109,6 +118,10 @@ public class MainActivity extends AppCompatActivity {
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(webSettings, true);
         } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
             WebSettingsCompat.setForceDark(webSettings, WebSettingsCompat.FORCE_DARK_AUTO);
+        }
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+            WebSettingsCompat.setWebAuthenticationSupport(webSettings, WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP);
         }
     }
 

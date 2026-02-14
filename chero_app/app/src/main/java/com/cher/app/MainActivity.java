@@ -9,6 +9,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Toast;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
@@ -22,6 +24,7 @@ public class MainActivity extends AppCompatActivity {
     private EditText editUrl;
     private EditText editPort;
     private SharedPreferences sharedPreferences;
+    private long lastBackPressTime = 0;
 
     private static final String PREFS_NAME = "CheroPrefs";
     private static final String KEY_URL = "url";
@@ -64,6 +67,24 @@ public class MainActivity extends AppCompatActivity {
 
             loadUrl(url, port);
             drawerLayout.closeDrawer(GravityCompat.START);
+        });
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                    drawerLayout.closeDrawer(GravityCompat.START);
+                } else if (webView.canGoBack()) {
+                    webView.goBack();
+                } else {
+                    if (System.currentTimeMillis() - lastBackPressTime < 2000) {
+                        finish();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Press back again to exit", Toast.LENGTH_SHORT).show();
+                        lastBackPressTime = System.currentTimeMillis();
+                    }
+                }
+            }
         });
     }
 
@@ -110,14 +131,4 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl(fullUrl);
     }
 
-    @Override
-    public void onBackPressed() {
-        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START);
-        } else if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
-    }
 }

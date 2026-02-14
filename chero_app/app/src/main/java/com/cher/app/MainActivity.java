@@ -69,6 +69,13 @@ public class MainActivity extends AppCompatActivity {
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
+
+        // Fix for "disallowed_useragent" error when using Google OAuth
+        String userAgent = webSettings.getUserAgentString();
+        // Remove "Version/X.X" and "; wv" from the user agent string
+        userAgent = userAgent.replaceAll("Version/[^\\s]+", "").replace("; wv", "");
+        webSettings.setUserAgentString(userAgent);
+
         webView.setWebViewClient(new WebViewClient());
     }
 

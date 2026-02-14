@@ -4,4 +4,5 @@
     <string name="url_hint">Website URL (e.g., https://example.com)</string>
     <string name="port_hint">TCP Port (default: 80 or 443)</string>
     <string name="save">Save</string>
+    <string name="google_web_client_id">102109158421-ig7hhpb4nfe6nhb4cplpoicektsefi3a.apps.googleusercontent.com</string>
 </resources>

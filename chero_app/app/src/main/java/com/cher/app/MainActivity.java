@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -12,14 +13,22 @@ import android.widget.EditText;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.core.view.GravityCompat;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private CredentialManager credentialManager;
     private DrawerLayout drawerLayout;
     private EditText editUrl;
     private EditText editPort;
@@ -43,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
         View btnMenu = findViewById(R.id.btn_menu);
 
         sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        credentialManager = CredentialManager.create(this);
 
         setupWebView();
 
@@ -93,11 +103,51 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
         webView.setWebViewClient(new WebViewClient());
+        webView.addJavascriptInterface(new WebAuthInterface(), "AndroidAuth");
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(webSettings, true);
         } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
             WebSettingsCompat.setForceDark(webSettings, WebSettingsCompat.FORCE_DARK_AUTO);
+        }
+    }
+
+    public class WebAuthInterface {
+        @JavascriptInterface
+        public void requestGoogleAuth() {
+            runOnUiThread(() -> {
+                GetGoogleIdOption googleIdOption = new GetGoogleIdOption.Builder()
+                        .setFilterByAuthorizedAccounts(false)
+                        .setServerClientId(getString(R.string.google_web_client_id))
+                        .setAutoSelectEnabled(true)
+                        .build();
+
+                GetCredentialRequest request = new GetCredentialRequest.Builder()
+                        .addCredentialOption(googleIdOption)
+                        .build();
+
+                credentialManager.getCredentialAsync(
+                        MainActivity.this,
+                        request,
+                        null,
+                        ContextCompat.getMainExecutor(MainActivity.this),
+                        new androidx.credentials.CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                            @Override
+                            public void onResult(GetCredentialResponse result) {
+                                if (result.getCredential() instanceof GoogleIdTokenCredential) {
+                                    GoogleIdTokenCredential credential = (GoogleIdTokenCredential) result.getCredential();
+                                    String idToken = credential.getIdToken();
+                                    webView.evaluateJavascript("if(window.onGoogleTokenReceived) { window.onGoogleTokenReceived('" + idToken + "'); }", null);
+                                }
+                            }
+
+                            @Override
+                            public void onError(GetCredentialException e) {
+                                Toast.makeText(MainActivity.this, "Auth failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                );
+            });
         }
     }
 

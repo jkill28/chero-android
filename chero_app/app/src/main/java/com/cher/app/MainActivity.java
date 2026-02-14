@@ -2,24 +2,43 @@ package com.cher.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
+import android.webkit.ConsoleMessage;
+import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Toast;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.core.view.GravityCompat;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
 import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewFeature;
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private CredentialManager credentialManager;
     private DrawerLayout drawerLayout;
     private EditText editUrl;
     private EditText editPort;
     private SharedPreferences sharedPreferences;
+    private long lastBackPressTime = 0;
 
     private static final String PREFS_NAME = "CheroPrefs";
     private static final String KEY_URL = "url";
@@ -38,6 +57,7 @@ public class MainActivity extends AppCompatActivity {
         View btnMenu = findViewById(R.id.btn_menu);
 
         sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        credentialManager = CredentialManager.create(this);
 
         setupWebView();
 
@@ -63,13 +83,133 @@ public class MainActivity extends AppCompatActivity {
             loadUrl(url, port);
             drawerLayout.closeDrawer(GravityCompat.START);
         });
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                    drawerLayout.closeDrawer(GravityCompat.START);
+                } else if (webView.canGoBack()) {
+                    webView.goBack();
+                } else {
+                    if (System.currentTimeMillis() - lastBackPressTime < 2000) {
+                        finish();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Press back again to exit", Toast.LENGTH_SHORT).show();
+                        lastBackPressTime = System.currentTimeMillis();
+                    }
+                }
+            }
+        });
     }
 
     private void setupWebView() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
+
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
+        webSettings.setDatabaseEnabled(true);
+        webSettings.setAllowFileAccess(true);
+        webSettings.setAllowContentAccess(true);
+        webSettings.setLoadWithOverviewMode(true);
+        webSettings.setUseWideViewPort(true);
+
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
+
+        // Standard Chrome-like User Agent to avoid 'disallowed_useragent'
+        String chromeUserAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+        webSettings.setUserAgentString(chromeUserAgent);
+
         webView.setWebViewClient(new WebViewClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
+                Log.d("CheroWebView", consoleMessage.message() + " -- From line "
+                        + consoleMessage.lineNumber() + " of "
+                        + consoleMessage.sourceId());
+                return true;
+            }
+        });
+
+        webView.addJavascriptInterface(new WebAuthInterface(), "AndroidAuth");
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(webSettings, true);
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            WebSettingsCompat.setForceDark(webSettings, WebSettingsCompat.FORCE_DARK_AUTO);
+        }
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+            WebSettingsCompat.setWebAuthenticationSupport(webSettings, WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP);
+        }
+    }
+
+    public class WebAuthInterface {
+        @JavascriptInterface
+        public void requestGoogleAuth() {
+            requestGoogleAuth(null);
+        }
+
+        @JavascriptInterface
+        public void requestGoogleAuth(String nonce) {
+            runOnUiThread(() -> {
+                GetGoogleIdOption.Builder builder = new GetGoogleIdOption.Builder()
+                        .setFilterByAuthorizedAccounts(false)
+                        .setServerClientId(getString(R.string.google_web_client_id))
+                        .setAutoSelectEnabled(true);
+
+                if (nonce != null && !nonce.isEmpty()) {
+                    builder.setNonce(nonce);
+                }
+
+                GetGoogleIdOption googleIdOption = builder.build();
+
+                GetCredentialRequest request = new GetCredentialRequest.Builder()
+                        .addCredentialOption(googleIdOption)
+                        .build();
+
+                credentialManager.getCredentialAsync(
+                        MainActivity.this,
+                        request,
+                        null,
+                        ContextCompat.getMainExecutor(MainActivity.this),
+                        new androidx.credentials.CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                            @Override
+                            public void onResult(GetCredentialResponse result) {
+                                if (result.getCredential() instanceof GoogleIdTokenCredential) {
+                                    GoogleIdTokenCredential credential = (GoogleIdTokenCredential) result.getCredential();
+                                    String idToken = credential.getIdToken();
+                                    Toast.makeText(MainActivity.this, "Google Auth Success", Toast.LENGTH_SHORT).show();
+                                    webView.evaluateJavascript("if(window.onGoogleTokenReceived) { window.onGoogleTokenReceived('" + idToken + "'); } else { console.error('window.onGoogleTokenReceived is not defined'); }", null);
+                                } else {
+                                    Toast.makeText(MainActivity.this, "Unexpected credential type", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+
+                            @Override
+                            public void onError(GetCredentialException e) {
+                                Toast.makeText(MainActivity.this, "Auth failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                );
+            });
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        CookieManager.getInstance().flush();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
     }
 
     private void loadUrl(String url, String port) {
@@ -102,14 +242,4 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl(fullUrl);
     }
 
-    @Override
-    public void onBackPressed() {
-        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START);
-        } else if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
-    }
 }
